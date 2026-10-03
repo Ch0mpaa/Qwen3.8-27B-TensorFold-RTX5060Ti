@@ -7,16 +7,18 @@
   <a href="https://screwedup.tech/chop-shop" target="_blank"><img src="https://img.shields.io/badge/Chop%20Shop-FF4500?style=for-the-badge&logo=data:image/svg+xml;base64,&logoColor=white" alt="Chop Shop" height="28" /></a>
 </p>
 
-Serve **Qwen3.8-27B** and **Qwen3.8 Flash Next** through an OpenAI-compatible API on a single consumer NVIDIA GPU
+Serve **Qwen3.8-27B** through an OpenAI-compatible API on a single consumer NVIDIA GPU
 with 16 GB VRAM, using [TensorFold](https://github.com/ashhart/TensorFold) v0.6.1. Windows and Linux,
 one command.
-
-Two models, one kit:
 
 | Model | Type | Size on disk | VRAM | Decode | Spec decode |
 | --- | --- | ---: | ---: | ---: | --- |
 | **Qwen3.8-27B** EXL3 2.0bpw | Dense | 6.8 GB | ~7.2 GB | **27.7 tok/s** | Not available on 16 GB |
-| **Qwen3.8 Flash Next** EXL3 2.05bpw | 512-expert MoE | 62.8 GB | ~8-10 GB + SSD | **TBD** | Native MTP (built-in) |
+
+> **Flash Next note:** Qwen3.8 Flash Next (512-expert MoE, 62.8 GB) does **not** fit on 16 GB even
+> with `--ssd-experts` maximum offload. The shared attention/embedding weights alone exceed available
+> VRAM after CUDA's 2 GB reserve. Flash Next needs 24 GB+ VRAM, or a DGX Spark (128 GB unified).
+> We tested and confirmed this — see [Speed tuning guide](#speed-tuning-guide).
 
 The dense model is proven and fast. Flash Next is the upgrade path — a 512-expert MoE with built-in
 multi-token prediction (MTP) that TensorFold uses for speculative decoding at zero extra VRAM, with
@@ -48,8 +50,11 @@ bandwidth-bound and GDDR7 delivers.
 
 ### Qwen3.8 Flash Next (EXL3 2.05bpw, MTP, SSD offload)
 
-*Benchmarks in progress.* Target: 40-60+ tok/s with native MTP speculative decoding and
-SSD expert offload on NVMe.
+**Does not fit on 16 GB.** Tested with `--ssd-experts 62 --context 256 --mtp-drafts 0` —
+TensorFold reports "0 tokens across the ranks." The shared attention and embedding weights
+(non-expert layers that cannot be offloaded) exceed available VRAM after the mandatory
+2 GB CUDA reserve. Flash Next needs 24 GB+ VRAM for TensorFold, or runs on DGX Spark
+(128 GB unified) at ~63.6 tok/s.
 
 ---
 
@@ -57,9 +62,9 @@ SSD expert offload on NVMe.
 
 | VRAM | Dense model | Flash Next | Notes |
 | ---: | --- | --- | --- |
-| 12 GB | 2.0 bpw @ 2k context | Not recommended | Floor: tight fit |
-| **16 GB** | **2.0 bpw @ 3k context** | **2.05 bpw + SSD offload** | **This kit's target** |
-| 24 GB | 4.0 bpw @ 8k context | 2.05 bpw, more in VRAM | Better quality |
+| 12 GB | 2.0 bpw @ 2k context | Does not fit | Floor: tight fit |
+| **16 GB** | **2.0 bpw @ 3k context** | **Does not fit** | **This kit's target (dense)** |
+| 24 GB | 4.0 bpw @ 8k context | 2.05 bpw + SSD offload | Flash Next starts here |
 | 32 GB+ | 6.0 bpw @ 16k+ context | 3.05 bpw, full in VRAM | Near-lossless |
 
 ### Why not higher bpw on 16 GB?
@@ -161,23 +166,29 @@ Everything lives in `.env` (copy `.env.example`). The important settings:
 | `--kv-dtype int4` | Rejected for dense Qwen3.8 on CUDA (Flash Next only) |
 | `--prefill-fp8` | Rejected for EXL3 packs (NVFP4 checkpoints only) |
 | `--lane-kernels auto` | On by default for tensor-unit GPUs (5060 Ti qualifies) |
+| `--ple-on-ssd` | MLX checkpoints only — EXL3 packs map n-gram table automatically |
 | Context 4096 | OOM at 4096, stable at 3072 |
+| **Flash Next + SSD offload** | **Does not fit on 16 GB.** Even `--ssd-experts 62 --context 256 --mtp-drafts 0` = 0 tokens. Shared weights exceed VRAM after 2 GB CUDA reserve. Needs 24 GB+. |
 
 ### What works
 
 1. **Disable thinking** (`THINKING=off`): 1.9 → 27.7 tok/s. Always do this unless you need chain-of-thought.
-2. **Kill other GPU processes** before starting: browsers, Discord, LM Studio eat VRAM silently.
-3. **Flash Next + MTP**: The upgrade path. MoE uses only active experts per token, SSD offload handles the rest, and built-in MTP gives speculative decode at zero extra VRAM cost.
+2. **Kill other GPU processes** before starting: browsers, Discord, LM Studio, Ollama eat VRAM silently.
+3. **Dense 2.0 bpw is king on 16 GB** — every other optimization path hits a wall (see table above).
 
-### MTP: why Flash Next is the endgame
+### MTP and Flash Next: tested, doesn't fit
 
 The dense Qwen3.8-27B has an MTP head in the checkpoint (50 MB, `mtp_num_hidden_layers: 1`,
 38 tensors at 2-bit). ExLlamaV3 uses it (`DRAFT=mtp` in Mia's kit). But TensorFold's CUDA
 engine requires DFlash2 for dense models — the MTP code path is Flash Next only.
 
-Flash Next is a 512-expert MoE where MTP is native. TensorFold loads it automatically,
-giving speculative decode without a separate 3.8 GB drafter. Combined with SSD expert
-offload (`--ssd-experts`), Flash Next fits on 16 GB and should decode significantly faster.
+Flash Next is a 512-expert MoE where MTP is native. We downloaded it (62.8 GB) and tested
+every combination of `--ssd-experts` (up to 62 GB), context (down to 256 tokens), and
+`--mtp-drafts 0`. Result: **"0 tokens across the ranks"** every time. The shared
+attention/embedding weights that cannot be offloaded to SSD exceed the 14 GB available
+after TensorFold's mandatory 2 GB CUDA reserve on a 16 GB card.
+
+Flash Next needs 24 GB+ VRAM. On a DGX Spark (128 GB unified memory) it runs at ~63.6 tok/s.
 
 ---
 
@@ -198,33 +209,34 @@ offload (`--ssd-experts`), Flash Next fits on 16 GB and should decode significan
   Total: ~8.8 GB used / 16 GB
 ```
 
-### Flash Next memory layout (16 GB + SSD)
+### Flash Next: why it doesn't fit (16 GB)
 
 ```
  RTX 5060 Ti — 16 GB GDDR7
 
+  TensorFold CUDA reserve      2.0 GB  (mandatory minimum)
   Windows/driver baseline     ~1.5 GB
-  Active expert weights       ~4-6 GB
-  Attention + shared layers   ~2-3 GB
-  KV cache (int4)            ~0.5 GB
-  MTP head                    ~0.05 GB
   ─────────────────────────────────
-  Free for context / cache    ~4-8 GB
+  Available for model          12.5 GB
 
-          | SSD offload (NVMe)
-          v
-  Inactive expert weights     ~50 GB
-  N-gram embedding table      ~26 GB
+  Flash Next shared weights   ~14+ GB  (attention, embeddings,
+                                         n-gram table — not offloadable)
+  ─────────────────────────────────
+  Result: does not fit. 0 tokens.
 ```
+
+Flash Next needs 24 GB+ VRAM where the shared weights fit with room for KV cache.
 
 ---
 
 ## What's next
 
-- [ ] Flash Next benchmark numbers on RTX 5060 Ti
+- [x] Flash Next on 16 GB — tested, does not fit (shared weights > 14 GB)
+- [ ] Flash Next recipe for 24 GB cards (RTX 4090 / 5080)
 - [ ] AMD ROCm recipe (RX 7900 XTX / Strix Halo)
 - [ ] Qualcomm GenieX NPU recipe (Snapdragon 8 Elite)
 - [ ] Multi-engine comparison: TensorFold vs ExLlamaV3 vs vLLM
+- [ ] Higher bpw quants (2.5, 3.0, 3.5) with tighter context
 - [ ] Offsec-tuned model variant
 
 ---

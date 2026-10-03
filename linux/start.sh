@@ -78,7 +78,6 @@ if [[ "$MODEL" == "flashnext" ]]; then
     MTP_DRAFTS="${MTP_DRAFTS:-6}"
     MTP_CONFIDENCE="${MTP_CONFIDENCE:-0.60}"
     SSD_EXPERTS_GIB="${SSD_EXPERTS_GIB:-50}"
-    PLE_ON_SSD="${PLE_ON_SSD:-1}"
 
     ARGS+=(--mtp-drafts "$MTP_DRAFTS")
     ARGS+=(--mtp-confidence "$MTP_CONFIDENCE")
