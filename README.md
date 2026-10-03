@@ -89,8 +89,11 @@ TensorFold reports "0 tokens across the ranks." The shared attention and embeddi
 | Disk | 7 GB (dense) or 63 GB (Flash Next) for model weights |
 | SSD | NVMe recommended for Flash Next expert offload |
 
-**Not needed:** CUDA Toolkit, Visual Studio Build Tools, Git.
-TensorFold ships prebuilt wheels for most configurations.
+**Windows only:** Visual Studio Build Tools (MSVC `cl.exe`) is needed for CUDA kernel JIT
+compilation on first inference. The setup script checks for it. TensorFold ships prebuilt
+Python wheels but compiles GPU kernels at runtime.
+
+**Not needed:** CUDA Toolkit (separate from driver), Git.
 
 ---
 
@@ -175,6 +178,16 @@ Everything lives in `.env` (copy `.env.example`). The important settings:
 1. **Disable thinking** (`THINKING=off`): 1.9 → 27.7 tok/s. Always do this unless you need chain-of-thought.
 2. **Kill other GPU processes** before starting: browsers, Discord, LM Studio, Ollama eat VRAM silently.
 3. **Dense 2.0 bpw is king on 16 GB** — every other optimization path hits a wall (see table above).
+
+### Windows gotchas
+
+| Issue | Fix |
+| --- | --- |
+| `vcvarsall.bat` hangs in headless/SSH sessions | Don't call it. Add `cl.exe` to PATH directly (the start script does this automatically). |
+| `TENSORFOLD_MEMORY_RESERVE_GIB=1` rejected | Minimum is 2. Set `TENSORFOLD_MEMORY_RESERVE_GIB=2`. |
+| First inference takes 60-120s | CUDA kernel JIT compilation. Subsequent queries are instant. |
+| `--checkpoint-slots` crash on dense model | Invalid flag for dense Qwen3.8 — don't use it. |
+| Process dies when SSH disconnects | The process needs an active session. Use a persistent terminal, `screen`, or a Windows scheduled task. |
 
 ### MTP and Flash Next: tested, doesn't fit
 

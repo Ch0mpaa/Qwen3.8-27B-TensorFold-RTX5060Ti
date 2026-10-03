@@ -34,6 +34,24 @@ if errorlevel 1 (
 for /f "tokens=*" %%G in ('nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2^>nul') do set CC=%%G
 echo [*] GPU compute capability: %CC%
 
+:: Check MSVC Build Tools (needed for CUDA JIT at inference time)
+where cl >nul 2>&1
+if errorlevel 1 (
+    set "MSVC_FOUND="
+    for /f "tokens=*" %%D in ('dir /b /ad "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC" 2^>nul') do set "MSVC_FOUND=1"
+    if not defined MSVC_FOUND (
+        echo [WARN] Visual Studio Build Tools not found.
+        echo        TensorFold needs cl.exe for CUDA kernel compilation.
+        echo        Install from: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+        echo        Select "Desktop development with C++" workload.
+        echo.
+    ) else (
+        echo [*] MSVC Build Tools found
+    )
+) else (
+    echo [*] cl.exe found in PATH
+)
+
 :: Create venv
 if not exist ".venv\Scripts\python.exe" (
     echo [*] Creating Python venv...

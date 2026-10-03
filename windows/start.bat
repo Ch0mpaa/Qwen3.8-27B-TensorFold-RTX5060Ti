@@ -58,6 +58,27 @@ if not exist "%MODEL_PATH%" (
     exit /b 1
 )
 
+:: CUDA JIT needs cl.exe — find MSVC without calling vcvarsall (which hangs in headless sessions)
+where cl >nul 2>nul
+if errorlevel 1 (
+    set "MSVC_FOUND="
+    for /f "tokens=*" %%D in ('dir /b /ad "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC" 2^>nul') do (
+        set "MSVC_CL=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\%%D\bin\Hostx64\x64"
+    )
+    if defined MSVC_CL if exist "!MSVC_CL!\cl.exe" (
+        set "PATH=!MSVC_CL!;%PATH%"
+        set "MSVC_FOUND=1"
+        echo [*] Added cl.exe to PATH from MSVC
+    )
+    if not defined MSVC_FOUND (
+        echo [WARN] cl.exe not found — CUDA JIT will fail on first inference
+        echo        Install Visual Studio Build Tools or add cl.exe to PATH
+    )
+)
+
+:: TensorFold requires at least 2 GiB memory reserve
+set TENSORFOLD_MEMORY_RESERVE_GIB=2
+
 :: Check VRAM
 echo [*] Checking GPU...
 for /f "tokens=*" %%G in ('nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2^>nul') do set FREE_VRAM=%%G
